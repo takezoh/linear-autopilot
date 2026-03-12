@@ -109,11 +109,14 @@ def run(phase: str, issue_id: str, issue_identifier: str, repo_path: str, parent
     model_key = f"FORGE_MODEL_{phase.upper()}"
     model = env.get(model_key, env["FORGE_MODEL"])
 
+    budget_key = f"FORGE_BUDGET_{phase.upper()}"
+    turns_key = f"FORGE_MAX_TURNS_{phase.upper()}"
+    budget = env.get(budget_key, "1.00")
+    max_turns = env.get(turns_key, "")
+
     if phase == "planning":
-        budget = env["FORGE_BUDGET_PLANNING"]
         work_dir = repo
     elif phase == "implementing":
-        budget = env["FORGE_BUDGET_IMPLEMENTING"]
         worktree_base = Path(env["FORGE_WORKTREE_DIR"])
         worktree_dir = worktree_base / repo.name / issue_identifier
         worktree_dir.parent.mkdir(parents=True, exist_ok=True)
@@ -143,16 +146,20 @@ def run(phase: str, issue_id: str, issue_identifier: str, repo_path: str, parent
 
         setup_sandbox(work_dir, log_dir)
 
+        cmd = [
+            "claude", "--print",
+            "--no-session-persistence",
+            "--max-budget-usd", budget,
+            "--model", model,
+            "--dangerously-skip-permissions",
+            "-p", prompt,
+        ]
+        if max_turns:
+            cmd.extend(["--max-turns", max_turns])
+
         with open(log_file, "w") as log:
             ret = subprocess.run(
-                [
-                    "claude", "--print",
-                    "--no-session-persistence",
-                    "--max-budget-usd", budget,
-                    "--model", model,
-                    "--dangerously-skip-permissions",
-                    "-p", prompt,
-                ],
+                cmd,
                 stdout=log, stderr=subprocess.STDOUT,
                 cwd=work_dir, env=run_env,
             )
