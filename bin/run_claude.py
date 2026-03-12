@@ -20,6 +20,24 @@ def load_env():
             env[k] = v.strip('"').strip("'")
     return env
 
+def sandbox_cmd(cmd: list[str], work_dir: Path, repo: Path) -> list[str]:
+    home = Path.home()
+    writable = [
+        str(work_dir),
+        str(repo / ".git"),
+        "/tmp",
+        str(home / ".claude"),
+        str(home / ".config"),
+        str(home / ".cache"),
+    ]
+    args = ["bwrap", "--ro-bind", "/", "/", "--dev", "/dev", "--proc", "/proc"]
+    for d in writable:
+        if Path(d).exists():
+            args += ["--bind", d, d]
+    args += ["--die-with-parent", "--"]
+    return args + cmd
+
+
 def mark_failed(env: dict, issue_id: str, log_file: Path):
     tail = ""
     if log_file.exists():
@@ -96,16 +114,19 @@ def run(phase: str, issue_id: str, issue_identifier: str, repo_path: str, parent
         run_env = {**os.environ}
         run_env.pop("CLAUDECODE", None)
 
+        claude_cmd = [
+            "claude", "--print",
+            "--no-session-persistence",
+            "--max-budget-usd", budget,
+            "--model", model,
+            "--permission-mode", "bypassPermissions",
+            "-p", prompt,
+        ]
+        cmd = sandbox_cmd(claude_cmd, work_dir, repo)
+
         with open(log_file, "w") as log:
             ret = subprocess.run(
-                [
-                    "claude", "--print",
-                    "--no-session-persistence",
-                    "--max-budget-usd", budget,
-                    "--model", model,
-                    "--permission-mode", "bypassPermissions",
-                    "-p", prompt,
-                ],
+                cmd,
                 stdout=log, stderr=subprocess.STDOUT,
                 cwd=work_dir, env=run_env,
             )
