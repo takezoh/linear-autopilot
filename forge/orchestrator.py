@@ -211,3 +211,4 @@ def main():
         p.wait()
 
     log("=== forge finished ===")
+    return len(processes) > 0

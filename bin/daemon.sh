@@ -6,6 +6,7 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 FORGE_ROOT="$(dirname "$SCRIPT_DIR")"
 
 while true; do
-    cd "$FORGE_ROOT" && python3 -m forge || true
-    sleep "$INTERVAL"
+    if ! (cd "$FORGE_ROOT" && python3 -m forge); then
+        sleep "$INTERVAL"
+    fi
 done

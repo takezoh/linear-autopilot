@@ -1,3 +1,4 @@
+import sys
 from .orchestrator import main
 
-main()
+sys.exit(0 if main() else 1)
