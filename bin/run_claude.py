@@ -193,6 +193,20 @@ def run(phase: str, issue_id: str, issue_identifier: str, repo_path: str,
         review_comments = fetch_pr_review_comments(issue_identifier, repo_path)
         prompt = prompt.replace("{{REVIEW_COMMENTS}}", review_comments or "(no comments)")
 
+    elif phase == "plan_review":
+        issue_detail = fetch_issue_detail(issue_id)
+        prompt = prompt.replace("{{ISSUE_DETAIL}}", json.dumps(issue_detail, indent=2, ensure_ascii=False))
+
+        parent_data = fetch_sub_issues(issue_id)
+        prompt = prompt.replace("{{PLAN_DOCUMENTS}}", json.dumps(parent_data.get("documents", []), indent=2, ensure_ascii=False))
+        prompt = prompt.replace("{{SUB_ISSUES}}", json.dumps(parent_data.get("sub_issues", []), indent=2, ensure_ascii=False))
+
+        comments = fetch_issue_comments(issue_id)
+        prompt = prompt.replace("{{REVIEW_COMMENTS}}", json.dumps(comments, indent=2, ensure_ascii=False))
+
+        todo_state_id = fetch_todo_state_id()
+        prompt = prompt.replace("{{TODO_STATE_ID}}", todo_state_id)
+
     elif phase == "implementing":
         sub_detail = fetch_issue_detail(issue_id)
         prompt = prompt.replace("{{SUB_ISSUE_DETAIL}}", json.dumps(sub_detail, indent=2, ensure_ascii=False))
@@ -214,6 +228,8 @@ def run(phase: str, issue_id: str, issue_identifier: str, repo_path: str,
     max_turns = env.get(turns_key, "")
 
     if phase == "planning":
+        work_dir = repo
+    elif phase == "plan_review":
         work_dir = repo
     elif phase == "implementing":
         worktree_dir = worktree_base / repo.name / issue_identifier
@@ -276,6 +292,10 @@ def run(phase: str, issue_id: str, issue_identifier: str, repo_path: str,
                 "mcp__linear-server__list_comments",
                 "mcp__linear-server__save_issue",
             ],
+            "plan_review": [
+                "mcp__linear-server__get_issue",
+                "mcp__linear-server__list_issue_statuses",
+            ],
             "review": [
                 "mcp__linear-server__save_issue",
                 "mcp__linear-server__get_issue",
@@ -310,6 +330,8 @@ def run(phase: str, issue_id: str, issue_identifier: str, repo_path: str,
 
         # Post-exec status update
         if phase == "planning":
+            update_issue_state(issue_id, "Pending Approval")
+        elif phase == "plan_review":
             update_issue_state(issue_id, "Pending Approval")
         elif phase == "implementing":
             update_issue_state(issue_id, "Done")

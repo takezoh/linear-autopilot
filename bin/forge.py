@@ -215,6 +215,9 @@ def main():
     log("Polling Implementing issues...")
     implementing_issues = poll("Implementing")
 
+    log("Polling Plan Changes Requested issues...")
+    plan_review_issues = poll("Plan Changes Requested")
+
     log("Polling Changes Requested issues...")
     review_issues = poll("Changes Requested")
 
@@ -300,6 +303,14 @@ def main():
             if all_done:
                 create_parent_pr(parent_identifier, parent["title"], repo_path,
                                  parent_id, lock_dir, env, sub_issues=sub_issues)
+
+    # Plan Review: dispatch parent issues directly
+    if plan_review_issues:
+        log(f"{len(plan_review_issues)} plan review issue(s) found")
+        for issue in plan_review_issues:
+            p = dispatch_issue("plan_review", issue, lock_dir, max_concurrent, repos)
+            if p:
+                processes.append(p)
 
     # Review: dispatch parent issues directly (PR already exists)
     if review_issues:

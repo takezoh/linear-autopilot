@@ -87,6 +87,7 @@ query($parentId: String!) {
         id
         identifier
         title
+        description
         state { name }
         labels {
           nodes {
@@ -255,6 +256,7 @@ def fetch_sub_issues(parent_id: str) -> dict:
             "id": node["id"],
             "identifier": node["identifier"],
             "title": node["title"],
+            "description": node.get("description", ""),
             "state": state_name,
             "labels": labels,
             "ready": is_ready(node),
