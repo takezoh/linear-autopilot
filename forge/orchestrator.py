@@ -1,45 +1,21 @@
-#!/usr/bin/env python3
-"""forge main entry point: Linear polling → issue dispatch → background execution."""
-
-import json
-import os
 import subprocess
 import sys
 import time
 from datetime import datetime
 from pathlib import Path
 
-from common import FORGE_ROOT, load_env, detect_default_branch
-from constants import (STATE_PLANNING, STATE_IMPLEMENTING,
-                       STATE_PLAN_CHANGES_REQUESTED, STATE_CHANGES_REQUESTED,
-                       STATE_IN_PROGRESS, STATE_IN_REVIEW, STATE_DONE)
-from poll import poll, fetch_sub_issues, fetch_issue_detail, update_issue_state
+from .config import FORGE_ROOT, load_env, load_repos, resolve_repo
+from .constants import (STATE_PLANNING, STATE_IMPLEMENTING,
+                        STATE_PLAN_CHANGES_REQUESTED, STATE_CHANGES_REQUESTED,
+                        STATE_IN_PROGRESS, STATE_IN_REVIEW, STATE_DONE)
+from .git import branch_exists, create_branch, detect_default_branch, worktree_add, worktree_remove, pr_create
+from .claude import generate_pr_body
+from .linear import poll, fetch_sub_issues, update_issue_state
 
-sys.path.insert(0, str(FORGE_ROOT / "bin"))
-
-
-def load_repos() -> dict[str, str]:
-    repos = {}
-    conf = FORGE_ROOT / "config" / "repos.conf"
-    with open(conf) as f:
-        for line in f:
-            line = line.strip()
-            if not line or line.startswith("#"):
-                continue
-            k, _, v = line.partition("=")
-            if k and v:
-                repos[k.strip()] = v.strip()
-    return repos
-
-def resolve_repo(labels: list[str], repos: dict[str, str]) -> str | None:
-    for label in labels:
-        if label.startswith("repo:"):
-            key = label.removeprefix("repo:")
-            return repos.get(key)
-    return None
 
 def count_locks(lock_dir: Path) -> int:
     return len(list(lock_dir.glob("*.lock")))
+
 
 def clean_stale_locks(lock_dir: Path, timeout_min: int):
     now = time.time()
@@ -48,58 +24,9 @@ def clean_stale_locks(lock_dir: Path, timeout_min: int):
         if age_min > timeout_min:
             lock.unlink(missing_ok=True)
 
+
 def log(msg: str):
     print(f"[{datetime.now():%H:%M:%S}] {msg}")
-
-def generate_pr_body(parent_id: str, parent_identifier: str, repo_path: str,
-                     sub_issues: list[dict], env: dict) -> tuple[str, str]:
-    prompt_file = FORGE_ROOT / "prompts" / "pr.md"
-    prompt = prompt_file.read_text()
-
-    parent_detail = fetch_issue_detail(parent_id)
-    prompt = prompt.replace("{{PARENT_ISSUE_DETAIL}}", json.dumps(parent_detail, indent=2, ensure_ascii=False))
-
-    parent_data = fetch_sub_issues(parent_id)
-    prompt = prompt.replace("{{PLAN_DOCUMENTS}}", json.dumps(parent_data.get("documents", []), indent=2, ensure_ascii=False))
-
-    sub_summary = []
-    for s in sub_issues:
-        sub_summary.append(f"- {s['identifier']}: {s['title']} ({s.get('state', '')})")
-    prompt = prompt.replace("{{SUB_ISSUES}}", "\n".join(sub_summary))
-
-    default_branch = detect_default_branch(repo_path)
-    diff_stat = subprocess.run(
-        ["git", "-C", repo_path, "diff", "--stat", f"{default_branch}...{parent_identifier}"],
-        capture_output=True, text=True,
-    )
-    prompt = prompt.replace("{{DIFF_STAT}}", diff_stat.stdout if diff_stat.returncode == 0 else "(unavailable)")
-
-    model = env.get("FORGE_MODEL_PR", env["FORGE_MODEL"])
-    ret = subprocess.run(
-        ["claude", "--print", "--no-session-persistence", "--model", model,
-         "--max-turns", "1", "-p", prompt],
-        capture_output=True, text=True, cwd=repo_path,
-    )
-    if ret.returncode != 0:
-        return parent_detail.get("title", parent_identifier), f"Parent issue: {parent_identifier}\n\nAll sub-issues completed."
-
-    output = ret.stdout.strip()
-    title = parent_detail.get("title", parent_identifier)
-    body = output
-
-    if "TITLE:" in output and "---" in output:
-        parts = output.split("---", 1)
-        for line in parts[0].splitlines():
-            if line.startswith("TITLE:"):
-                title = line.removeprefix("TITLE:").strip()
-                break
-        body = parts[1].strip()
-        if body.startswith("```"):
-            body = body.split("\n", 1)[1] if "\n" in body else body
-        if body.endswith("```"):
-            body = body.rsplit("\n", 1)[0] if "\n" in body else body
-
-    return title, body
 
 
 def create_parent_pr(parent_identifier: str, parent_title: str, repo_path: str,
@@ -116,13 +43,9 @@ def create_parent_pr(parent_identifier: str, parent_title: str, repo_path: str,
     title, body = generate_pr_body(parent_id, parent_identifier, repo_path,
                                    sub_issues or [], env)
 
-    ret = subprocess.run(
-        ["gh", "pr", "create", "--draft",
-         "--title", f"{parent_identifier}: {title}",
-         "--body", body,
-         "--head", parent_identifier, "--base", detect_default_branch(repo_path)],
-        capture_output=True, text=True, cwd=repo_path,
-    )
+    default_branch = detect_default_branch(repo_path)
+    ret = pr_create(repo_path, f"{parent_identifier}: {title}", body,
+                    parent_identifier, default_branch)
     if ret.returncode == 0:
         log(f"  Created PR for {parent_identifier}")
     else:
@@ -134,10 +57,7 @@ def create_parent_pr(parent_identifier: str, parent_title: str, repo_path: str,
 
     parent_worktree = Path(env["FORGE_WORKTREE_DIR"]) / Path(repo_path).name / parent_identifier
     if parent_worktree.exists():
-        subprocess.run(
-            ["git", "-C", repo_path, "worktree", "remove", str(parent_worktree), "--force"],
-            capture_output=True,
-        )
+        worktree_remove(repo_path, str(parent_worktree))
 
 
 def dispatch_issue(phase: str, issue: dict, lock_dir: Path, max_concurrent: int,
@@ -168,13 +88,14 @@ def dispatch_issue(phase: str, issue: dict, lock_dir: Path, max_concurrent: int,
     log(f"  Start {identifier} ({phase}): {title}")
     lock_file.write_text(identifier)
 
-    cmd = [sys.executable, str(FORGE_ROOT / "bin" / "run_claude.py"), phase, issue_id, identifier, repo_path]
+    cmd = [sys.executable, "-m", "forge.executor", phase, issue_id, identifier, repo_path]
     if parent_id:
         cmd.append(parent_id)
     if parent_identifier:
         cmd.append(parent_identifier)
 
-    return subprocess.Popen(cmd)
+    return subprocess.Popen(cmd, cwd=str(FORGE_ROOT))
+
 
 def main():
     env = load_env()
@@ -236,16 +157,9 @@ def main():
                 log(f"  Skip {parent_identifier} (dependency cycle: {' -> '.join(result['cycle'])})")
                 continue
 
-            ret = subprocess.run(
-                ["git", "-C", repo_path, "rev-parse", "--verify", parent_identifier],
-                capture_output=True,
-            )
-            if ret.returncode != 0:
+            if not branch_exists(repo_path, parent_identifier):
                 default_branch = detect_default_branch(repo_path)
-                br_ret = subprocess.run(
-                    ["git", "-C", repo_path, "branch", parent_identifier, default_branch],
-                    capture_output=True, text=True,
-                )
+                br_ret = create_branch(repo_path, parent_identifier, default_branch)
                 if br_ret.returncode != 0:
                     log(f"  Failed to create parent branch {parent_identifier} from {default_branch}: {br_ret.stderr.strip()}")
                     continue
@@ -254,10 +168,7 @@ def main():
             parent_worktree = Path(env["FORGE_WORKTREE_DIR"]) / Path(repo_path).name / parent_identifier
             if not parent_worktree.exists():
                 parent_worktree.parent.mkdir(parents=True, exist_ok=True)
-                subprocess.run(
-                    ["git", "-C", repo_path, "worktree", "add", str(parent_worktree), parent_identifier],
-                    capture_output=True,
-                )
+                worktree_add(repo_path, str(parent_worktree), parent_identifier)
                 log(f"  Created parent worktree: {parent_worktree}")
 
             ready = [s for s in sub_issues if s.get("ready")]
@@ -300,6 +211,3 @@ def main():
         p.wait()
 
     log("=== forge finished ===")
-
-if __name__ == "__main__":
-    main()

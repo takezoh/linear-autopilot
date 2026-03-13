@@ -1,12 +1,9 @@
-#!/usr/bin/env python3
-"""Linear polling: output issues with a given status as a JSON array."""
-
 import json
 import sys
 import urllib.request
 
-from common import load_env, get_api_key, parse_labels
-from constants import TERMINAL_STATES, STATE_DONE, STATE_TODO
+from .config import load_env, get_api_key, parse_labels
+from .constants import TERMINAL_STATES, STATE_DONE, STATE_TODO
 
 
 def graphql(api_key: str, query: str, variables: dict = None) -> dict:
@@ -174,7 +171,6 @@ def is_ready(node: dict) -> bool:
 
 
 def detect_dependency_cycle(nodes: list[dict]) -> list[str] | None:
-    """Return identifier list of the cycle if one exists in blocks relations among sub-issues."""
     id_set = {n["id"] for n in nodes}
     id_to_ident = {n["id"]: n["identifier"] for n in nodes}
 
@@ -323,11 +319,3 @@ def fetch_todo_state_id(team_id: str = "", env=None) -> str:
     data = graphql(api_key, WORKFLOW_STATES_QUERY, {"teamId": team_id})
     states = data.get("data", {}).get("workflowStates", {}).get("nodes", [])
     return next((s["id"] for s in states if s["name"] == STATE_TODO), "")
-
-
-if __name__ == "__main__":
-    if len(sys.argv) < 2:
-        print("Usage: poll.py <status_name>", file=sys.stderr)
-        sys.exit(1)
-    issues = poll(sys.argv[1])
-    print(json.dumps(issues))

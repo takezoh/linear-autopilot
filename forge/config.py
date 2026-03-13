@@ -1,6 +1,5 @@
 import json
 import os
-import subprocess
 from pathlib import Path
 
 FORGE_ROOT = Path(__file__).resolve().parent.parent
@@ -44,25 +43,6 @@ def load_env():
     return env
 
 
-def detect_default_branch(repo_path: str) -> str:
-    ret = subprocess.run(
-        ["git", "-C", repo_path, "symbolic-ref", "refs/remotes/origin/HEAD"],
-        capture_output=True, text=True,
-    )
-    if ret.returncode != 0:
-        subprocess.run(
-            ["git", "-C", repo_path, "remote", "set-head", "origin", "--auto"],
-            capture_output=True,
-        )
-        ret = subprocess.run(
-            ["git", "-C", repo_path, "symbolic-ref", "refs/remotes/origin/HEAD"],
-            capture_output=True, text=True,
-        )
-    if ret.returncode == 0:
-        return ret.stdout.strip().split("/")[-1]
-    return "main"
-
-
 def get_api_key(env=None):
     if env:
         key = env.get("LINEAR_API_KEY")
@@ -78,3 +58,25 @@ def parse_labels(label_nodes) -> list[str]:
         name = label["name"]
         labels.append(f"{parent['name']}:{name}" if parent else name)
     return labels
+
+
+def load_repos() -> dict[str, str]:
+    repos = {}
+    conf = FORGE_ROOT / "config" / "repos.conf"
+    with open(conf) as f:
+        for line in f:
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            k, _, v = line.partition("=")
+            if k and v:
+                repos[k.strip()] = v.strip()
+    return repos
+
+
+def resolve_repo(labels: list[str], repos: dict[str, str]) -> str | None:
+    for label in labels:
+        if label.startswith("repo:"):
+            key = label.removeprefix("repo:")
+            return repos.get(key)
+    return None

@@ -9,4 +9,4 @@ if [[ -d "$VENV_DIR" ]]; then
   source "$VENV_DIR/bin/activate"
 fi
 
-exec python3 "$SCRIPT_DIR/forge.py" "$@"
+exec python3 -m forge "$@"

@@ -46,7 +46,7 @@ sudo apt-get install bubblewrap socat
 ## Usage
 
 ```bash
-python bin/forge.py
+python -m forge
 ```
 
 Or via the wrapper script:
@@ -58,7 +58,7 @@ bin/main.sh
 ## Architecture
 
 ```
-forge.py
+orchestrator.py (python -m forge)
   ├── Poll "Planning" issues → dispatch to planning prompt
   ├── Poll "Plan Changes Requested" issues → dispatch to plan_review prompt
   ├── Poll "Implementing" issues (parent) → fetch sub-issues + dependency check
@@ -67,7 +67,7 @@ forge.py
   ├── Poll "Changes Requested" issues → dispatch to review prompt
   └── Wait for all processes
 
-run_claude.py
+executor.py (python -m forge.executor)
   ├── Load prompt template + substitute variables
   ├── Pre-fetch Linear data (issue detail, documents, sub-issues, comments)
   ├── Create worktree (implementing / review only)
@@ -130,11 +130,16 @@ Enable the following automations:
 
 | Path | Description |
 |------|-------------|
-| `bin/forge.py` | Main entry point — polling, dispatch, concurrency |
-| `bin/poll.py` | Linear GraphQL polling + sub-issue dependency resolution |
-| `bin/run_claude.py` | Per-issue claude CLI execution with sandbox |
+| `forge/__main__.py` | Entry point (`python -m forge`) |
+| `forge/constants.py` | State/phase constants |
+| `forge/config.py` | Configuration loading, repo resolution |
+| `forge/linear.py` | Linear GraphQL client |
+| `forge/git.py` | git/gh subprocess wrappers |
+| `forge/claude.py` | Claude CLI execution, sandbox settings |
+| `forge/orchestrator.py` | Polling, dispatch, PR creation |
+| `forge/executor.py` | Per-issue execution (prompt, worktree, post-processing) |
 | `bin/check_cycle.py` | Dependency cycle detection CLI |
-| `bin/main.sh` | Shell wrapper for forge.py |
+| `bin/main.sh` | Shell wrapper |
 | `bin/daemon.sh` | Daemon loop wrapper for systemd |
 | `bin/service-systemd.sh` | systemd user service management |
 | `prompts/planning.md` | Planning phase prompt template |
