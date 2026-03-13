@@ -141,29 +141,30 @@ def run(phase: str, issue_id: str, issue_identifier: str, repo_path: str,
     elif phase == "implementing":
         worktree_dir = worktree_base / repo.name / issue_identifier
         worktree_dir.parent.mkdir(parents=True, exist_ok=True)
-
-        # Create worktree: new branch from parent branch (or default branch)
-        base_branch = parent_identifier if parent_identifier else detect_default_branch(str(repo))
-        ret = subprocess.run(
-            ["git", "-C", str(repo), "worktree", "add", str(worktree_dir), "-b", issue_identifier, base_branch],
-            capture_output=True, text=True,
-        )
-        if ret.returncode != 0:
-            print(f"worktree add (new branch) failed: {ret.stderr.strip()}", file=sys.stderr)
-            ret = subprocess.run(
-                ["git", "-C", str(repo), "worktree", "add", str(worktree_dir), issue_identifier],
-                capture_output=True, text=True,
-            )
-            if ret.returncode != 0:
-                print(f"Failed to create worktree for {issue_identifier}: {ret.stderr.strip()}", file=sys.stderr)
-                sys.exit(1)
-
         work_dir = worktree_dir
     else:
         print(f"Unknown phase: {phase}", file=sys.stderr)
         sys.exit(1)
 
     try:
+        if phase == "implementing":
+            # Create worktree: new branch from parent branch (or default branch)
+            base_branch = parent_identifier if parent_identifier else detect_default_branch(str(repo))
+            ret = subprocess.run(
+                ["git", "-C", str(repo), "worktree", "add", str(worktree_dir), "-b", issue_identifier, base_branch],
+                capture_output=True, text=True,
+            )
+            if ret.returncode != 0:
+                print(f"worktree add (new branch) failed: {ret.stderr.strip()}", file=sys.stderr)
+                ret = subprocess.run(
+                    ["git", "-C", str(repo), "worktree", "add", str(worktree_dir), issue_identifier],
+                    capture_output=True, text=True,
+                )
+                if ret.returncode != 0:
+                    print(f"Failed to create worktree for {issue_identifier}: {ret.stderr.strip()}", file=sys.stderr)
+                    mark_failed(env, issue_id, log_file)
+                    sys.exit(1)
+
         run_env = {**os.environ}
         run_env.pop("CLAUDECODE", None)
 
