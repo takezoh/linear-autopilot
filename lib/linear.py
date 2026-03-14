@@ -1,23 +1,19 @@
-import json
 import sys
-import urllib.request
+
+import httpx
 
 from config import load_env, get_api_key, parse_labels
 from config.constants import TERMINAL_STATES, STATE_DONE, STATE_TODO
 
 
 def graphql(api_key: str, query: str, variables: dict = None) -> dict:
-    payload = json.dumps({"query": query, "variables": variables or {}}).encode()
-    req = urllib.request.Request(
+    resp = httpx.post(
         "https://api.linear.app/graphql",
-        data=payload,
-        headers={
-            "Authorization": api_key,
-            "Content-Type": "application/json",
-        },
+        json={"query": query, "variables": variables or {}},
+        headers={"Authorization": api_key},
     )
-    with urllib.request.urlopen(req) as resp:
-        return json.loads(resp.read())
+    resp.raise_for_status()
+    return resp.json()
 
 TEAM_QUERY = """
 query($teamName: String!) {
@@ -374,9 +370,7 @@ def create_attachment(issue_id: str, title: str, content: bytes, filename: str,
     })
     upload = data["data"]["fileUpload"]["uploadFile"]
 
-    req = urllib.request.Request(upload["uploadUrl"], data=content, method="PUT")
-    req.add_header("Content-Type", content_type)
-    urllib.request.urlopen(req)
+    httpx.put(upload["uploadUrl"], content=content, headers={"Content-Type": content_type}).raise_for_status()
 
     graphql(api_key, ATTACHMENT_CREATE_MUTATION, {
         "issueId": issue_id,
