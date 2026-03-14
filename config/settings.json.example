@@ -30,27 +30,6 @@
   "allowed_tools": {
     "implementing": ["Edit", "Write", "Glob", "Grep", "Read", "Bash"]
   },
-  "disallowed_tools": {
-    "planning": [
-      "mcp__linear-server__get_issue",
-      "mcp__linear-server__list_issue_statuses"
-    ],
-    "implementing": [
-      "mcp__linear-server__get_issue",
-      "mcp__linear-server__list_documents",
-      "mcp__linear-server__list_comments",
-      "mcp__linear-server__save_issue"
-    ],
-    "plan_review": [
-      "mcp__linear-server__get_issue",
-      "mcp__linear-server__list_issue_statuses"
-    ],
-    "review": [
-      "mcp__linear-server__save_issue",
-      "mcp__linear-server__get_issue",
-      "mcp__linear-server__list_documents"
-    ]
-  },
   "claude": {
     "sandbox": {
       "enabled": true,
