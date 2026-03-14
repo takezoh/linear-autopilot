@@ -344,7 +344,7 @@ def fetch_issue_comments(issue_id: str, env=None) -> list[dict]:
 UPLOAD_FILE_MUTATION = """
 mutation($contentType: String!, $filename: String!, $size: Int!) {
   fileUpload(contentType: $contentType, filename: $filename, size: $size) {
-    uploadFile { uploadUrl assetUrl }
+    uploadFile { uploadUrl assetUrl headers { key value } }
   }
 }
 """
@@ -370,7 +370,10 @@ def create_attachment(issue_id: str, title: str, content: bytes, filename: str,
     })
     upload = data["data"]["fileUpload"]["uploadFile"]
 
-    httpx.put(upload["uploadUrl"], content=content, headers={"Content-Type": content_type}).raise_for_status()
+    headers = {"Content-Type": content_type}
+    for h in upload.get("headers", []):
+        headers[h["key"]] = h["value"]
+    httpx.put(upload["uploadUrl"], content=content, headers=headers).raise_for_status()
 
     graphql(api_key, ATTACHMENT_CREATE_MUTATION, {
         "issueId": issue_id,
