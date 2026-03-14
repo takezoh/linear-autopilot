@@ -95,12 +95,15 @@ forge (daemon)  → consume_queue(queue_dir) → merged into session_map → dis
 - **Zombie reaping**: `reap_children()` reaps terminated child processes via `os.waitpid(-1, WNOHANG)`
 - **Timeout**: Locks older than `lock_timeout_min` are automatically removed by `clean_stale_locks`
 
-## Sandbox
+## Sandbox & Permissions
 
 Configure sandbox settings in `claude.sandbox` in `settings.json` (see `settings.json.example`).
 See [Claude Code sandboxing docs](https://code.claude.com/docs/en/sandboxing) for available options.
 
-`setup_sandbox` in `lib/claude.py` writes `claude` settings to `.claude/settings.local.json` inside the worktree, dynamically adding log directory and parent repo's `.git/worktrees` to `allowWrite`. Sub-issue execution also adds the parent issue's worktree directory.
+`setup_settings` in `lib/claude.py` writes `claude` settings to `.claude/settings.local.json` inside the worktree:
+
+- **Sandbox**: Dynamically adds log directory and parent repo's `.git/worktrees` to `allowWrite`. Sub-issue execution also adds the parent issue's worktree directory.
+- **Permissions**: Dynamically generates `permissions.allow` and `permissions.deny` based on the current phase. `mcp__linear-server__*` is always allowed via wildcard. Phase-specific denied tools are defined in `PHASE_DENIED_TOOLS` in `config/constants.py`. Phase-specific allowed tools can be configured via `allowed_tools` in `settings.json`.
 
 ## Configuration
 
@@ -119,5 +122,4 @@ Settings in `config/settings.json`:
 | `lock_timeout_min` | int | Lock file expiration time (minutes) |
 | `webhook` | object | `host`, `port` — Webhook server settings |
 | `allowed_tools` | object | Per-phase allowed tools list |
-| `disallowed_tools` | object | Per-phase disallowed tools list |
 | `claude.sandbox` | object | Sandbox settings (see Sandbox section above) |

@@ -3,7 +3,7 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
-from config import FORGE_ROOT, load_env, load_config, get_api_key
+from config import FORGE_ROOT, load_env, get_api_key
 from config.constants import (STATE_PENDING_APPROVAL, STATE_DONE, STATE_IN_REVIEW,
                         STATE_FAILED, PHASE_PLANNING, PHASE_IMPLEMENTING,
                         PHASE_REVIEW, PHASE_PLAN_REVIEW)
@@ -20,20 +20,11 @@ def resolve_config(phase: str, env: dict) -> dict:
     model_key = f"FORGE_MODEL_{phase.upper()}"
     budget_key = f"FORGE_BUDGET_{phase.upper()}"
     turns_key = f"FORGE_MAX_TURNS_{phase.upper()}"
-    model = env.get(model_key, env["FORGE_MODEL"])
-    budget = env.get(budget_key, "1.00")
-    max_turns = env[turns_key]
-
-    cfg = load_config()
-    allowed = cfg.get("allowed_tools", {}).get(phase)
-    disallowed = cfg.get("disallowed_tools", {}).get(phase)
-
     return {
-        "model": model,
-        "budget": budget,
-        "max_turns": max_turns,
-        "allowed_tools": allowed,
-        "disallowed_tools": disallowed,
+        "model": env.get(model_key, env["FORGE_MODEL"]),
+        "budget": env.get(budget_key, "1.00"),
+        "max_turns": env[turns_key],
+        "phase": phase,
     }
 
 

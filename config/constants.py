@@ -17,6 +17,28 @@ PHASE_IMPLEMENTING = "implementing"
 PHASE_REVIEW = "review"
 PHASE_PLAN_REVIEW = "plan_review"
 
+PHASE_DENIED_TOOLS = {
+    PHASE_PLANNING: [
+        "mcp__linear-server__get_issue",
+        "mcp__linear-server__list_issue_statuses",
+    ],
+    PHASE_IMPLEMENTING: [
+        "mcp__linear-server__get_issue",
+        "mcp__linear-server__list_documents",
+        "mcp__linear-server__list_comments",
+        "mcp__linear-server__save_issue",
+    ],
+    PHASE_PLAN_REVIEW: [
+        "mcp__linear-server__get_issue",
+        "mcp__linear-server__list_issue_statuses",
+    ],
+    PHASE_REVIEW: [
+        "mcp__linear-server__save_issue",
+        "mcp__linear-server__get_issue",
+        "mcp__linear-server__list_documents",
+    ],
+}
+
 # Agent Session states
 SESSION_PENDING = "pending"
 SESSION_ACTIVE = "active"

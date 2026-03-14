@@ -4,12 +4,14 @@ import subprocess
 from pathlib import Path
 
 from config import FORGE_ROOT, load_config
+from config.constants import PHASE_DENIED_TOOLS
 from lib.git import detect_default_branch, diff_stat
 from lib.linear import fetch_issue_detail, fetch_sub_issues
 
 
-def setup_sandbox(work_dir: Path, *, log_dir: Path | None = None,
-                  extra_write_paths: list[str] | None = None):
+def setup_settings(work_dir: Path, *, phase: str = "",
+                   log_dir: Path | None = None,
+                   extra_write_paths: list[str] | None = None):
     user_config = load_config()
     settings = user_config.get("claude", {})
 
@@ -30,6 +32,18 @@ def setup_sandbox(work_dir: Path, *, log_dir: Path | None = None,
                 if path_str not in fs["allowWrite"]:
                     fs["allowWrite"].append(path_str)
 
+    cfg = load_config()
+    allow = ["mcp__linear-server__*"]
+    deny = []
+
+    if phase:
+        phase_allow = cfg.get("allowed_tools", {}).get(phase)
+        if phase_allow:
+            allow = phase_allow + ["mcp__linear-server__*"]
+        deny = PHASE_DENIED_TOOLS.get(phase, [])
+
+    settings["permissions"] = {"allow": allow, "deny": deny}
+
     claude_dir = work_dir / ".claude"
     claude_dir.mkdir(exist_ok=True)
     settings_file = claude_dir / "settings.local.json"
@@ -38,14 +52,13 @@ def setup_sandbox(work_dir: Path, *, log_dir: Path | None = None,
 
 def run(prompt: str, work_dir: Path, *,
         model: str, max_turns: str, budget: str = "1.00",
-        allowed_tools: list[str] | None = None,
-        disallowed_tools: list[str] | None = None,
+        phase: str = "",
         log_file: Path | None = None,
         capture_output: bool = False,
         allow_write: list[str] | None = None):
-    setup_sandbox(work_dir,
-                  log_dir=log_file.parent if log_file else None,
-                  extra_write_paths=allow_write)
+    setup_settings(work_dir, phase=phase,
+                   log_dir=log_file.parent if log_file else None,
+                   extra_write_paths=allow_write)
 
     cmd = [
         "claude", "--print",
@@ -56,10 +69,6 @@ def run(prompt: str, work_dir: Path, *,
         "-p", prompt,
         "--output-format", "json",
     ]
-    if allowed_tools:
-        cmd.extend(["--allowedTools", ",".join(allowed_tools)])
-    if disallowed_tools:
-        cmd.extend(["--disallowedTools", ",".join(disallowed_tools)])
 
     if capture_output:
         ret = subprocess.run(
