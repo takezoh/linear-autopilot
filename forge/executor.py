@@ -11,8 +11,9 @@ from .git import (detect_default_branch, has_new_commits, worktree_add,
                   worktree_remove, merge, merge_abort, push, delete_branch,
                   pr_diff, fetch_pr_review_comments)
 from .claude import run as run_claude
-from .linear import (update_issue_state, create_comment, fetch_issue_detail,
-                     fetch_issue_comments, fetch_todo_state_id, fetch_sub_issues)
+from .linear import (update_issue_state, create_comment, create_attachment,
+                     fetch_issue_detail, fetch_issue_comments,
+                     fetch_todo_state_id, fetch_sub_issues)
 
 DISALLOWED_TOOLS_MAP = {
     PHASE_PLANNING: [
@@ -55,20 +56,58 @@ def resolve_config(phase: str, env: dict) -> dict:
     }
 
 
+def parse_claude_result(log_file: Path) -> tuple[str, str | None]:
+    if not log_file.exists():
+        return "", None
+
+    text = log_file.read_text()
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError:
+        lines = text.splitlines()
+        return f"```\n{'\n'.join(lines[-20:])}\n```", None
+
+    raw_json = json.dumps(data, indent=2, ensure_ascii=False)
+    parts = []
+
+    result_text = data.get("result", "")
+    if result_text:
+        parts.append(result_text)
+
+    stop_reason = data.get("stop_reason", "")
+    duration_s = round(data.get("duration_ms", 0) / 1000)
+    cost = data.get("total_cost_usd", 0)
+    turns = data.get("num_turns", 0)
+    parts.append(f"**Stop reason**: {stop_reason} | **Duration**: {duration_s}s | **Cost**: ${cost:.2f} | **Turns**: {turns}")
+
+    denials = data.get("permission_denials", [])
+    if denials:
+        denial_lines = []
+        for d in denials:
+            tool = d.get("tool_name", "unknown")
+            inp = d.get("tool_input", {})
+            path = inp.get("file_path") or inp.get("path") or ""
+            denial_lines.append(f"- `{tool}` → `{path}`" if path else f"- `{tool}`")
+        parts.append("**Permission denials**:\n" + "\n".join(denial_lines))
+
+    return "\n\n".join(parts), raw_json
+
+
 def mark_failed(issue_id: str, log_file: Path, reason: str = ""):
-    tail = ""
-    if log_file.exists():
-        lines = log_file.read_text().splitlines()
-        tail = "\n".join(lines[-20:])
+    comment_body, raw_json = parse_claude_result(log_file)
 
     update_issue_state(issue_id, STATE_FAILED)
     parts = []
     if reason:
         parts.append(reason)
-    if tail:
-        parts.append(f"```\n{tail}\n```")
+    if comment_body:
+        parts.append(comment_body)
     body = "\n\n".join(parts) or "Execution failed."
     create_comment(issue_id, body)
+
+    if raw_json:
+        create_attachment(issue_id, "Execution Log",
+                          raw_json.encode(), f"{issue_id}.json")
 
 
 def prepare_prompt(phase, issue_id, issue_identifier, parent_issue_id, parent_identifier, repo_path, env):

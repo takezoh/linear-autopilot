@@ -328,6 +328,46 @@ def fetch_issue_comments(issue_id: str, env=None) -> list[dict]:
     return [{"body": c["body"], "user": c.get("user", {}).get("name", ""), "createdAt": c["createdAt"]} for c in comments]
 
 
+UPLOAD_FILE_MUTATION = """
+mutation($contentType: String!, $filename: String!, $size: Int!) {
+  fileUpload(contentType: $contentType, filename: $filename, size: $size) {
+    uploadFile { uploadUrl assetUrl }
+  }
+}
+"""
+
+ATTACHMENT_CREATE_MUTATION = """
+mutation($issueId: String!, $title: String!, $url: String!) {
+  attachmentCreate(input: { issueId: $issueId, title: $title, url: $url }) {
+    attachment { id }
+  }
+}
+"""
+
+
+def create_attachment(issue_id: str, title: str, content: bytes, filename: str,
+                      content_type: str = "application/json", env=None):
+    if env is None:
+        env = load_env()
+    api_key = get_api_key(env)
+    data = graphql(api_key, UPLOAD_FILE_MUTATION, {
+        "contentType": content_type,
+        "filename": filename,
+        "size": len(content),
+    })
+    upload = data["data"]["fileUpload"]["uploadFile"]
+
+    req = urllib.request.Request(upload["uploadUrl"], data=content, method="PUT")
+    req.add_header("Content-Type", content_type)
+    urllib.request.urlopen(req)
+
+    graphql(api_key, ATTACHMENT_CREATE_MUTATION, {
+        "issueId": issue_id,
+        "title": title,
+        "url": upload["assetUrl"],
+    })
+
+
 def fetch_todo_state_id(team_id: str = "", env=None) -> str:
     if env is None:
         env = load_env()
