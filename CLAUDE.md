@@ -22,9 +22,9 @@ Linear-driven AI agent. Automatically plans and implements tasks triggered by is
 - `bin/` — Shell scripts (`forge.sh`, `webhook.sh`, `service-systemd.sh`, `service-launchd.sh`)
 - `scripts/` — Utility scripts (`check_cycle.py`)
 - `prompts/` — Prompt templates for each phase
-- `config/settings.json` — Configuration values (git ignored)
-- `config/secrets.env` — Credentials (git ignored)
-- `config/repos.conf` — Label → repository path mapping (git ignored)
+- `config/settings.json` — Configuration values (git ignored, do NOT commit)
+- `config/secrets.env` — Credentials (git ignored, do NOT commit)
+- `config/repos.conf` — Label → repository path mapping (git ignored, do NOT commit)
 
 ## Flow
 
