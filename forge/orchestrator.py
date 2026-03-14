@@ -1,5 +1,8 @@
+import os
+import signal
 import subprocess
 import sys
+import threading
 import time
 from datetime import datetime
 from pathlib import Path
@@ -11,6 +14,7 @@ from config.constants import (STATE_PLANNING, STATE_IMPLEMENTING,
 from lib.git import branch_exists, create_branch, detect_default_branch, worktree_add, worktree_remove, pr_create
 from lib.claude import generate_pr_body
 from lib.linear import poll, fetch_sub_issues, update_issue_state
+from forge.queue import dequeue_all
 
 
 def count_locks(lock_dir: Path) -> int:
@@ -27,6 +31,27 @@ def clean_stale_locks(lock_dir: Path, timeout_min: int):
 
 def log(msg: str):
     print(f"[{datetime.now():%H:%M:%S}] {msg}")
+
+
+def reap_children():
+    while True:
+        try:
+            os.waitpid(-1, os.WNOHANG)
+        except ChildProcessError:
+            break
+
+
+def consume_queue(queue_dir: str) -> dict[str, dict]:
+    items = dequeue_all(queue_dir)
+    session_map = {}
+    for item in items:
+        issue_id = item.get("issue_id", "")
+        if issue_id:
+            session_map[issue_id] = {
+                "session_id": item.get("session_id", ""),
+                "phase": item.get("phase", ""),
+            }
+    return session_map
 
 
 def create_parent_pr(parent_identifier: str, parent_title: str, repo_path: str,
@@ -68,7 +93,8 @@ def create_parent_pr(parent_identifier: str, parent_title: str, repo_path: str,
 
 def dispatch_issue(phase: str, issue: dict, lock_dir: Path, max_concurrent: int,
                    repos: dict[str, str], parent_id: str = "",
-                   parent_identifier: str = "") -> subprocess.Popen | None:
+                   parent_identifier: str = "",
+                   session_id: str = "") -> subprocess.Popen | None:
     issue_id = issue["id"]
     identifier = issue["identifier"]
     title = issue["title"]
@@ -92,20 +118,24 @@ def dispatch_issue(phase: str, issue: dict, lock_dir: Path, max_concurrent: int,
         return None
 
     log(f"  Start {identifier} ({phase}): {title}")
-    lock_file.write_text(identifier)
+    lock_content = f"{identifier}\n{os.getpid()}\n{session_id}"
+    lock_file.write_text(lock_content)
 
     cmd = [sys.executable, "-m", "forge.executor", phase, issue_id, identifier, repo_path]
     if parent_id:
         cmd.append(parent_id)
     if parent_identifier:
         cmd.append(parent_identifier)
+    if session_id:
+        cmd.extend(["--session-id", session_id])
 
     return subprocess.Popen(cmd, cwd=str(FORGE_ROOT))
 
 
-def run_once(env: dict) -> bool:
+def run_once(env: dict, session_map: dict[str, dict] | None = None) -> bool:
     log_dir = Path(env["FORGE_LOG_DIR"])
     lock_dir = Path(env["FORGE_LOCK_DIR"])
+    queue_dir = env["FORGE_QUEUE_DIR"]
     max_concurrent = int(env["FORGE_MAX_CONCURRENT"])
     lock_timeout = int(env["FORGE_LOCK_TIMEOUT_MIN"])
 
@@ -115,6 +145,11 @@ def run_once(env: dict) -> bool:
     repos = load_repos()
 
     clean_stale_locks(lock_dir, lock_timeout)
+
+    queued = consume_queue(queue_dir)
+    if session_map is None:
+        session_map = {}
+    session_map.update(queued)
 
     log("Polling Planning issues...")
     planning_issues = poll(STATE_PLANNING)
@@ -128,14 +163,16 @@ def run_once(env: dict) -> bool:
     log("Polling Changes Requested issues...")
     review_issues = poll(STATE_CHANGES_REQUESTED)
 
-    processes: list[subprocess.Popen] = []
+    dispatched = False
 
     if planning_issues:
         log(f"{len(planning_issues)} planning issue(s) found")
         for issue in planning_issues:
-            p = dispatch_issue("planning", issue, lock_dir, max_concurrent, repos)
+            sid = session_map.get(issue["id"], {}).get("session_id", "")
+            p = dispatch_issue("planning", issue, lock_dir, max_concurrent, repos,
+                               session_id=sid)
             if p:
-                processes.append(p)
+                dispatched = True
 
     if implementing_issues:
         log(f"{len(implementing_issues)} implementing parent issue(s) found")
@@ -143,6 +180,8 @@ def run_once(env: dict) -> bool:
             parent_id = parent["id"]
             parent_identifier = parent["identifier"]
             parent_labels = parent.get("labels", [])
+
+            parent_session_id = session_map.get(parent_id, {}).get("session_id", "")
 
             repo_path = resolve_repo(parent_labels, repos)
             if not repo_path:
@@ -185,11 +224,13 @@ def run_once(env: dict) -> bool:
                     "title": sub["title"],
                     "labels": parent_labels,
                 }
+                sub_sid = session_map.get(sub["id"], {}).get("session_id", "") or parent_session_id
                 p = dispatch_issue("implementing", sub_issue, lock_dir, max_concurrent, repos,
-                                   parent_id=parent_id, parent_identifier=parent_identifier)
+                                   parent_id=parent_id, parent_identifier=parent_identifier,
+                                   session_id=sub_sid)
                 if p:
                     update_issue_state(sub["id"], STATE_IN_PROGRESS)
-                    processes.append(p)
+                    dispatched = True
 
             all_done = all(s.get("state") == STATE_DONE for s in sub_issues) and len(sub_issues) > 0
             if all_done:
@@ -199,21 +240,22 @@ def run_once(env: dict) -> bool:
     if plan_review_issues:
         log(f"{len(plan_review_issues)} plan review issue(s) found")
         for issue in plan_review_issues:
-            p = dispatch_issue("plan_review", issue, lock_dir, max_concurrent, repos)
+            sid = session_map.get(issue["id"], {}).get("session_id", "")
+            p = dispatch_issue("plan_review", issue, lock_dir, max_concurrent, repos,
+                               session_id=sid)
             if p:
-                processes.append(p)
+                dispatched = True
 
     if review_issues:
         log(f"{len(review_issues)} review feedback issue(s) found")
         for issue in review_issues:
-            p = dispatch_issue("review", issue, lock_dir, max_concurrent, repos)
+            sid = session_map.get(issue["id"], {}).get("session_id", "")
+            p = dispatch_issue("review", issue, lock_dir, max_concurrent, repos,
+                               session_id=sid)
             if p:
-                processes.append(p)
+                dispatched = True
 
-    for p in processes:
-        p.wait()
-
-    return len(processes) > 0
+    return dispatched
 
 
 def main(interval: int = 0):
@@ -223,8 +265,27 @@ def main(interval: int = 0):
         log("=== forge (single run) ===")
         return run_once(env)
 
+    pid_file = Path(env["FORGE_PID_FILE"])
+    pid_file.parent.mkdir(parents=True, exist_ok=True)
+    pid_file.write_text(str(os.getpid()))
+
+    event = threading.Event()
+
+    def _wake_handler(signum, frame):
+        event.set()
+
+    signal.signal(signal.SIGUSR1, _wake_handler)
+
     log(f"=== forge daemon (interval={interval}s) ===")
-    while True:
-        run_once(env)
-        log(f"Sleeping {interval}s...")
-        time.sleep(interval)
+    try:
+        while True:
+            event.clear()
+            reap_children()
+            dispatched = run_once(env)
+            if dispatched:
+                event.wait(interval)
+            else:
+                log("Idle, waiting up to 300s...")
+                event.wait(300)
+    finally:
+        pid_file.unlink(missing_ok=True)

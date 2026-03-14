@@ -4,8 +4,6 @@ import logging
 import os
 import re
 import signal
-import subprocess
-import sys
 import threading
 from pathlib import Path
 
@@ -17,11 +15,9 @@ from config.constants import (STATE_PLANNING, STATE_IMPLEMENTING,
                         PHASE_PLANNING, PHASE_IMPLEMENTING,
                         PHASE_REVIEW, PHASE_PLAN_REVIEW)
 from lib.linear import emit_thought, emit_response, emit_error, fetch_issue_detail, fetch_issue_state
+from forge.queue import enqueue, wake
 
 app = Flask(__name__)
-
-_processes: dict[str, subprocess.Popen] = {}
-_processes_lock = threading.Lock()
 
 STATE_TO_PHASE = {
     STATE_PLANNING: PHASE_PLANNING,
@@ -59,58 +55,16 @@ def _handle_created(payload: dict, env: dict):
     if not identifier:
         identifier = issue_detail.get("identifier", issue_id)
 
-    labels = issue_detail.get("labels", [])
-
-    emit_thought(session_id, f"Starting work on {identifier}...", api_key)
+    emit_thought(session_id, f"Queuing work on {identifier}...", api_key)
 
     state_name = fetch_issue_state(issue_id, env)
-    phase = STATE_TO_PHASE.get(state_name)
-    if not phase:
-        phase = PHASE_PLANNING
+    phase = STATE_TO_PHASE.get(state_name, PHASE_PLANNING)
 
-    repos = load_repos()
-    repo_path = resolve_repo(labels, repos)
-    if not repo_path:
-        emit_thought(session_id, f"No repo label found for {identifier}.", api_key)
-        return
-    if not Path(repo_path).is_dir():
-        emit_thought(session_id, f"Repo not found: {repo_path}", api_key)
-        return
+    queue_dir = env["FORGE_QUEUE_DIR"]
+    pid_file = env["FORGE_PID_FILE"]
 
-    lock_dir = Path(env["FORGE_LOCK_DIR"])
-    lock_dir.mkdir(parents=True, exist_ok=True)
-    lock_file = lock_dir / f"{issue_id}.lock"
-    if lock_file.exists():
-        emit_thought(session_id, f"Issue {identifier} is already being processed.", api_key)
-        return
-
-    lock_file.write_text(identifier)
-
-    cmd = [
-        sys.executable, "-m", "forge.executor",
-        phase, issue_id, identifier, repo_path,
-    ]
-
-    extra_env = {**os.environ, "FORGE_SESSION_ID": session_id}
-
-    try:
-        proc = subprocess.Popen(cmd, cwd=str(FORGE_ROOT), env=extra_env)
-    except Exception as e:
-        lock_file.unlink(missing_ok=True)
-        emit_error(session_id, f"Failed to start executor: {e}", api_key)
-        return
-
-    with _processes_lock:
-        _processes[session_id] = proc
-
-    def _wait():
-        returncode = proc.wait()
-        with _processes_lock:
-            _processes.pop(session_id, None)
-        if returncode != 0:
-            lock_file.unlink(missing_ok=True)
-
-    threading.Thread(target=_wait, daemon=True).start()
+    enqueue(queue_dir, issue_id, session_id, phase)
+    wake(pid_file)
 
 
 def _handle_prompted(payload: dict, env: dict):
@@ -124,10 +78,19 @@ def _handle_stop(payload: dict, env: dict):
     session_id = payload.get("agentSession", {}).get("id", "")
     api_key = get_api_key(env)
 
-    with _processes_lock:
-        proc = _processes.get(session_id)
-        if proc and proc.poll() is None:
-            proc.send_signal(signal.SIGTERM)
+    lock_dir = Path(env["FORGE_LOCK_DIR"])
+    for lock_file in lock_dir.glob("*.lock"):
+        try:
+            lines = lock_file.read_text().splitlines()
+            if len(lines) >= 3 and lines[2] == session_id:
+                pid = int(lines[1])
+                cmdline_path = Path(f"/proc/{pid}/cmdline")
+                if cmdline_path.exists():
+                    cmdline = cmdline_path.read_text()
+                    if "forge.executor" in cmdline:
+                        os.kill(pid, signal.SIGTERM)
+        except (ValueError, ProcessLookupError, OSError):
+            continue
 
     emit_response(session_id, "Stopped.", api_key)
 
@@ -155,17 +118,16 @@ def _process_event(payload: dict, env: dict):
 
 @app.route("/webhook", methods=["POST"])
 def webhook():
-    secret = os.environ.get("LINEAR_WEBHOOK_SECRET", "")
-    if secret:
-        signature = request.headers.get("Linear-Signature", "")
-        if not _verify_signature(request.data, signature, secret):
-            return jsonify({"error": "invalid signature"}), 401
-    else:
-        logging.warning("LINEAR_WEBHOOK_SECRET is not set; skipping signature verification")
+    env = app.config.get("FORGE_ENV") or {}
+    secret = env.get("LINEAR_WEBHOOK_SECRET", "")
+    if not secret:
+        return jsonify({"error": "LINEAR_WEBHOOK_SECRET is not configured"}), 500
+
+    signature = request.headers.get("Linear-Signature", "")
+    if not _verify_signature(request.data, signature, secret):
+        return jsonify({"error": "invalid signature"}), 401
 
     payload = request.get_json(force=True, silent=True) or {}
-
-    env = app.config.get("FORGE_ENV") or {}
 
     thread = threading.Thread(target=_process_event, args=(payload, env), daemon=True)
     thread.start()
