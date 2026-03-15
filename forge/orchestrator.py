@@ -321,7 +321,11 @@ def main(interval: int = 300):
     def _wake_handler(signum, frame):
         event.set()
 
+    def _int_handler(signum, frame):
+        raise KeyboardInterrupt
+
     signal.signal(signal.SIGUSR1, _wake_handler)
+    signal.signal(signal.SIGINT, _int_handler)
 
     log(f"=== forge daemon (interval={interval}s) ===")
     try:
