@@ -186,5 +186,5 @@ Settings in `config/settings.json`:
 | `max_concurrent` | int | Maximum concurrent executions |
 | `lock_timeout_min` | int | Lock file expiration time (minutes) |
 | `webhook` | object | `host`, `port` — Webhook server settings |
-| `allowed_tools` | object | Per-phase allowed tools list |
+| `allowed_tools` | object | Per-phase allowed tools. `code_editing` key applies to `implementing` and `review` phases; phase-specific keys override |
 | `claude.sandbox` | object | Sandbox settings (see Sandbox section above) |

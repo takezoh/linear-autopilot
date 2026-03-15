@@ -12,7 +12,6 @@ from lib.linear import fetch_issue_detail, fetch_sub_issues
 _current_process: subprocess.Popen | None = None
 
 _CODE_EDITING_PHASES = {"implementing", "review"}
-_CODE_EDITING_TOOLS = ["Edit", "Write", "Glob", "Grep", "Read", "Bash"]
 
 
 def get_current_process() -> subprocess.Popen | None:
@@ -49,7 +48,7 @@ def setup_settings(work_dir: Path, *, phase: str = "",
     if phase:
         phase_allow = cfg.get("allowed_tools", {}).get(phase)
         if not phase_allow and phase in _CODE_EDITING_PHASES:
-            phase_allow = _CODE_EDITING_TOOLS
+            phase_allow = cfg.get("allowed_tools", {}).get("code_editing")
         if phase_allow:
             allow = phase_allow + ["mcp__linear-server__*"]
         deny = PHASE_DENIED_TOOLS.get(phase, [])
