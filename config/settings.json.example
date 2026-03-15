@@ -5,13 +5,15 @@
     "planning": "3.00",
     "implementing": "5.00",
     "plan_review": "3.00",
-    "review": "3.00"
+    "review": "3.00",
+    "subissue_creation": "5.00"
   },
   "max_turns": {
     "planning": 30,
     "implementing": 50,
     "plan_review": 30,
-    "review": 30
+    "review": 30,
+    "subissue_creation": 15
   },
   "model": {
     "default": "sonnet",
@@ -19,7 +21,8 @@
     "implementing": "sonnet",
     "plan_review": "sonnet",
     "pr": "haiku",
-    "review": "opus"
+    "review": "opus",
+    "subissue_creation": "sonnet"
   },
   "log_dir": "/path/to/logs",
   "lock_dir": "/path/to/lock",
