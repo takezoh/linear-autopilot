@@ -11,6 +11,8 @@ Two-process architecture:
 
 Each task runs in an isolated Git worktree inside Claude Code's sandbox.
 
+![Linear issue with sub-issues managed by Loki](docs/images/linear-sub-issues.png)
+
 ## Linear Setup
 
 ### GitHub Integration
