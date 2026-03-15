@@ -222,6 +222,9 @@ def post_execute(phase, issue_id, issue_identifier, parent_issue_id, parent_iden
     if phase in (PHASE_PLANNING, PHASE_PLAN_REVIEW):
         comment_body, raw_json = parse_claude_result(log_file)
         if comment_body:
+            has_marker = "AUTO_APPROVED" in comment_body or "NEEDS_HUMAN_REVIEW" in comment_body
+            if not has_marker:
+                comment_body = "⚠️ Approval marker missing — defaulting to human review.\n\n" + comment_body
             create_comment(issue_id, comment_body)
         if "AUTO_APPROVED" in (comment_body or ""):
             update_issue_state(issue_id, STATE_IMPLEMENTING)

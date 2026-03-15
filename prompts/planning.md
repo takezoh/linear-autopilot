@@ -23,6 +23,7 @@ Launch an Agent tool (`subagent_type: Plan`, `model: opus`) and delegate codebas
 Include the following in the prompt:
 - Issue title, description, labels
 - Instruction: "Investigate the codebase and create an implementation plan. Focus on what needs to change, why, and which files are involved. Do NOT break it into sub-issues — just produce a coherent plan."
+- Constraint: "Return the full plan as text in your response. Do NOT create or update Linear documents or issues — that is handled by the caller."
 
 ### 3. Self-Review
 
@@ -30,6 +31,8 @@ Evaluate the Plan agent's output against the issue's intent:
 - Does the plan address the issue's goals and requirements?
 - Are there gaps, misunderstandings, or scope creep?
 - Is the approach technically sound?
+
+If the Plan agent's result is empty or does not contain a plan, re-launch the Plan agent once with explicit instruction to return the full plan as text.
 
 If there are significant problems, provide specific feedback and re-launch the Plan agent (maximum 2 retries). Include your feedback and the previous plan in the new prompt.
 
