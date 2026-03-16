@@ -181,6 +181,15 @@ def run_once(env: dict, session_map: dict[str, dict] | None = None) -> bool:
 
     dispatched = False
 
+    if review_issues:
+        log(f"{len(review_issues)} review feedback issue(s) found")
+        for issue in review_issues:
+            sid = session_map.get(issue["id"], {}).get("session_id", "")
+            p = dispatch_issue("review", issue, lock_dir, max_concurrent, repos,
+                               session_id=sid)
+            if p:
+                dispatched = True
+
     if planning_issues:
         log(f"{len(planning_issues)} planning issue(s) found")
         for issue in planning_issues:
@@ -268,15 +277,6 @@ def run_once(env: dict, session_map: dict[str, dict] | None = None) -> bool:
                            parent_id, json.dumps(sub_issues)]
                     subprocess.Popen(cmd, cwd=str(FORGE_ROOT))
                     log(f"  Started PR creation for {parent_identifier}")
-
-    if review_issues:
-        log(f"{len(review_issues)} review feedback issue(s) found")
-        for issue in review_issues:
-            sid = session_map.get(issue["id"], {}).get("session_id", "")
-            p = dispatch_issue("review", issue, lock_dir, max_concurrent, repos,
-                               session_id=sid)
-            if p:
-                dispatched = True
 
     return dispatched
 
