@@ -2,6 +2,7 @@ import json
 import os
 import signal
 import subprocess
+import time
 from pathlib import Path
 
 from config import FORGE_ROOT, load_config
@@ -61,13 +62,42 @@ def setup_settings(work_dir: Path, *, phase: str = "",
     settings_file.write_text(json.dumps(settings, indent=2))
 
 
+_POLL_INTERVAL = 10
+
+
+def _wait_with_idle_check(proc, cmd, log_fh, timeout, idle_timeout):
+    if not idle_timeout:
+        proc.wait(timeout=timeout)
+        return
+
+    now = time.monotonic()
+    deadline = now + timeout if timeout else None
+    idle_deadline = now + idle_timeout
+    last_size = 0
+
+    while proc.poll() is None:
+        time.sleep(_POLL_INTERVAL)
+        now = time.monotonic()
+
+        if deadline and now >= deadline:
+            raise subprocess.TimeoutExpired(cmd, timeout)
+
+        cur_size = os.fstat(log_fh.fileno()).st_size
+        if cur_size != last_size:
+            last_size = cur_size
+            idle_deadline = now + idle_timeout
+        elif now >= idle_deadline:
+            raise subprocess.TimeoutExpired(cmd, idle_timeout)
+
+
 def run(prompt: str, work_dir: Path, *,
         model: str, max_turns: str, budget: str = "1.00",
         phase: str = "",
         log_file: Path | None = None,
         capture_output: bool = False,
         allow_write: list[str] | None = None,
-        timeout: int | None = None):
+        timeout: int | None = None,
+        idle_timeout: int | None = None):
     global _current_process
 
     setup_settings(work_dir, phase=phase,
@@ -117,7 +147,7 @@ def run(prompt: str, work_dir: Path, *,
             try:
                 proc.stdin.write(prompt)
                 proc.stdin.close()
-                proc.wait(timeout=timeout)
+                _wait_with_idle_check(proc, cmd, log, timeout, idle_timeout)
             except subprocess.TimeoutExpired:
                 os.killpg(proc.pid, signal.SIGKILL)
                 proc.wait()

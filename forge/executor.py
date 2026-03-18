@@ -31,19 +31,24 @@ PHASE_TIMEOUTS = {
     "subissue_creation": 15 * 60,
 }
 
+IDLE_TIMEOUT = 10 * 60
+
 
 def resolve_config(phase: str, env: dict) -> dict:
     model_key = f"FORGE_MODEL_{phase.upper()}"
     budget_key = f"FORGE_BUDGET_{phase.upper()}"
     turns_key = f"FORGE_MAX_TURNS_{phase.upper()}"
     timeout_key = f"FORGE_TIMEOUT_{phase.upper()}"
+    idle_timeout_key = f"FORGE_IDLE_TIMEOUT_{phase.upper()}"
     timeout = int(env[timeout_key]) if timeout_key in env else PHASE_TIMEOUTS.get(phase)
+    idle_timeout = int(env[idle_timeout_key]) if idle_timeout_key in env else IDLE_TIMEOUT
     return {
         "model": env.get(model_key, env["FORGE_MODEL"]),
         "budget": env.get(budget_key, "1.00"),
         "max_turns": env[turns_key],
         "phase": phase,
         "timeout": timeout,
+        "idle_timeout": idle_timeout,
     }
 
 
@@ -366,9 +371,9 @@ def run(phase: str, issue_id: str, issue_identifier: str, repo_path: str,
             ret = run_claude(prompt, work_dir, **cfg,
                              log_file=log_file,
                              allow_write=extra_write)
-        except subprocess.TimeoutExpired:
+        except subprocess.TimeoutExpired as e:
             mark_failed(issue_id, log_file,
-                        reason=f"Claude CLI timed out after {cfg['timeout']}s during {phase}.",
+                        reason=f"Claude CLI timed out after {e.timeout}s during {phase}.",
                         session_id=session_id, api_key=api_key)
             sys.exit(1)
 
